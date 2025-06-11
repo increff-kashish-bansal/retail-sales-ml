@@ -443,6 +443,15 @@ def load_data():
             try:
                 logger.info(f"Attempting to load data from: {path}")
                 if os.path.exists(path):
+                    # Check if file is a Git LFS pointer
+                    with open(path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        if content.startswith('version https://git-lfs.github.com/spec/v1'):
+                            logger.error(f"File at {path} is a Git LFS pointer. The actual data file needs to be downloaded.")
+                            logger.error("Please run 'git lfs pull' to download the actual data file.")
+                            raise ValueError("Git LFS pointer file detected. Please run 'git lfs pull' to download the actual data file.")
+                    
+                    # If not a Git LFS pointer, proceed with loading
                     sales_df = pd.read_csv(path, sep='\t')
                     used_path = path
                     logger.info(f"Successfully loaded data from: {path}")

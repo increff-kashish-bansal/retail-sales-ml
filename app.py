@@ -139,6 +139,21 @@ def load_sales_data(file_path=None, uploaded_file=None):
             
             logger.info(f"File size: {os.path.getsize(file_path)} bytes")
             
+            # Check if file is a Git LFS pointer
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if content.startswith('version https://git-lfs.github.com/spec/v1'):
+                    error_msg = (
+                        "Git LFS pointer file detected. The actual data file needs to be downloaded.\n"
+                        "Please run 'git lfs pull' to download the actual data file.\n"
+                        "If you're using Streamlit Cloud, you may need to:\n"
+                        "1. Install Git LFS on your local machine\n"
+                        "2. Run 'git lfs pull' locally\n"
+                        "3. Push the actual data file to the repository"
+                    )
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+            
             # Try different encodings
             encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
             for encoding in encodings:

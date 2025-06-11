@@ -47,19 +47,83 @@ def load_sales_data(file_path=None, uploaded_file=None):
             logger.info("Loading data from uploaded file...")
             logger.info(f"Uploaded file type: {type(uploaded_file)}")
             logger.info(f"Uploaded file name: {uploaded_file.name}")
-            sales_df = pd.read_csv(uploaded_file, sep='\t')
+            # Read the file content first
+            content = uploaded_file.read()
+            logger.info(f"File content preview: {content[:500]}")
+            # Reset file pointer
+            uploaded_file.seek(0)
+            # Try different separators
+            try:
+                sales_df = pd.read_csv(uploaded_file, sep='\t')
+                logger.info("Successfully read with tab separator")
+            except Exception as e1:
+                logger.warning(f"Failed to read with tab separator: {str(e1)}")
+                try:
+                    uploaded_file.seek(0)
+                    sales_df = pd.read_csv(uploaded_file, sep=',')
+                    logger.info("Successfully read with comma separator")
+                except Exception as e2:
+                    logger.warning(f"Failed to read with comma separator: {str(e2)}")
+                    uploaded_file.seek(0)
+                    # Try to detect separator
+                    content = uploaded_file.read()
+                    uploaded_file.seek(0)
+                    if '\t' in content:
+                        sales_df = pd.read_csv(uploaded_file, sep='\t', engine='python')
+                        logger.info("Successfully read with python engine and tab separator")
+                    else:
+                        raise Exception("Could not determine file format")
         else:
             logger.info(f"Loading data from file: {file_path}")
             logger.info(f"File exists: {os.path.exists(file_path)}")
             if os.path.exists(file_path):
                 logger.info(f"File size: {os.path.getsize(file_path)} bytes")
-                with open(file_path, 'r') as f:
-                    logger.info(f"First few lines of file:\n{f.readline()}\n{f.readline()}\n{f.readline()}")
-            sales_df = pd.read_csv(file_path, sep='\t')
+                # Read file content for debugging
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    logger.info(f"File content preview: {content[:500]}")
+                # Try different separators
+                try:
+                    sales_df = pd.read_csv(file_path, sep='\t')
+                    logger.info("Successfully read with tab separator")
+                except Exception as e1:
+                    logger.warning(f"Failed to read with tab separator: {str(e1)}")
+                    try:
+                        sales_df = pd.read_csv(file_path, sep=',')
+                        logger.info("Successfully read with comma separator")
+                    except Exception as e2:
+                        logger.warning(f"Failed to read with comma separator: {str(e2)}")
+                        # Try to detect separator
+                        if '\t' in content:
+                            sales_df = pd.read_csv(file_path, sep='\t', engine='python')
+                            logger.info("Successfully read with python engine and tab separator")
+                        else:
+                            raise Exception("Could not determine file format")
+            else:
+                raise FileNotFoundError(f"File not found: {file_path}")
         
         logger.info(f"Data loaded. Shape: {sales_df.shape}")
         logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
         logger.info(f"First few rows of data:\n{sales_df.head()}")
+        
+        # Check for column name variations
+        column_mapping = {
+            'day': ['day', 'date', 'Day', 'Date'],
+            'store': ['store', 'Store', 'store_id', 'Store_ID'],
+            'sku': ['sku', 'SKU', 'product_id', 'Product_ID'],
+            'disc_value': ['disc_value', 'discount', 'Discount', 'discount_value'],
+            'revenue': ['revenue', 'Revenue', 'sales', 'Sales'],
+            'qty': ['qty', 'quantity', 'Quantity', 'QTY']
+        }
+        
+        # Map columns to standard names
+        for standard_name, variations in column_mapping.items():
+            for var in variations:
+                if var in sales_df.columns:
+                    if var != standard_name:
+                        logger.info(f"Renaming column '{var}' to '{standard_name}'")
+                        sales_df = sales_df.rename(columns={var: standard_name})
+                    break
         
         # Ensure required columns exist
         required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
@@ -93,6 +157,8 @@ def load_sales_data(file_path=None, uploaded_file=None):
 if 'sales_df' not in st.session_state:
     st.session_state.sales_df = None
     st.session_state.data_error = None
+    st.session_state.model = None
+    st.session_state.model_error = None
 
 # Create models directory if it doesn't exist
 os.makedirs('models', exist_ok=True)
@@ -114,21 +180,26 @@ st.markdown("""
 st.markdown("### 📁 1. Data Upload", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-use_default = st.checkbox("Use default sample file (sales_sample.tsv)")
+use_sample = st.checkbox("Use sample dataset", value=True)
 
-if not use_default:
-    sales_file = st.file_uploader("Upload Sales Data (TSV)", type=['tsv'])
-    if sales_file is not None:
-        sales_df, error = load_sales_data(uploaded_file=sales_file)
-        if error:
-            st.error(error)
-            st.info("Falling back to sample data file...")
-            sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
+if use_sample:
+    sales_df, error = load_sales_data('data/sales_sample.tsv')
+    if error:
+        st.error(f"Error loading sample data: {error}")
     else:
-        st.info("No file uploaded. Using sample data file...")
-        sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
+        st.success("Sample data loaded successfully!")
+        st.session_state.sales_df = sales_df
+        st.session_state.data_error = None
 else:
-    sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
+    uploaded_file = st.file_uploader("Upload your sales data (TSV format)", type=['tsv'])
+    if uploaded_file is not None:
+        sales_df, error = load_sales_data(uploaded_file=uploaded_file)
+        if error:
+            st.error(f"Error loading uploaded data: {error}")
+        else:
+            st.success("Data uploaded successfully!")
+            st.session_state.sales_df = sales_df
+            st.session_state.data_error = None
 
 if error:
     st.error(error)
@@ -410,4 +481,24 @@ if model is not None:
             st.error(f"Error making prediction: {str(e)}")
             logger.error(f"Error making prediction: {str(e)}", exc_info=True)
 else:
-    st.info("Please train the model first to enable predictions.") 
+    st.info("Please train the model first to enable predictions.")
+
+# Display diagnostic information in an expander
+with st.expander("Diagnostic Information"):
+    st.subheader("Data Information")
+    if st.session_state.sales_df is not None:
+        st.write(f"Number of rows: {len(st.session_state.sales_df)}")
+        st.write(f"Number of columns: {len(st.session_state.sales_df.columns)}")
+        st.write("Column names:", st.session_state.sales_df.columns.tolist())
+        st.write("Data types:", st.session_state.sales_df.dtypes.to_dict())
+    
+    st.subheader("Model Information")
+    if st.session_state.model is not None:
+        st.write("Model type:", type(st.session_state.model).__name__)
+        st.write("Model parameters:", st.session_state.model.get_params())
+    
+    st.subheader("Error Information")
+    if st.session_state.data_error:
+        st.error(f"Data error: {st.session_state.data_error}")
+    if st.session_state.model_error:
+        st.error(f"Model error: {st.session_state.model_error}") 

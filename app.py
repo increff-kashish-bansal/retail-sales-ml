@@ -325,6 +325,8 @@ if 'selected_features' not in st.session_state:
     st.session_state.selected_features = None
 if 'feature_importance' not in st.session_state:
     st.session_state.feature_importance = None
+if 'model_error' not in st.session_state:
+    st.session_state.model_error = None
 if 'predictions' not in st.session_state:
     st.session_state.predictions = pd.DataFrame(columns=[
         'store', 'day', 'avg_mrp', 'disc_percentage', 
@@ -645,6 +647,54 @@ if st.session_state.model is not None:
                             f"₹{actual_revenue:,.2f}",
                             delta=f"Difference: ₹{predicted_revenue - actual_revenue:,.2f}"
                         )
+                
+                # Display historical sales data
+                st.markdown("""
+                    <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
+                        Historical Sales Data
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Get historical sales for same store, day, and month
+                historical_sales = st.session_state.sales_df[
+                    (st.session_state.sales_df['store'] == future_store) &
+                    (st.session_state.sales_df['day'].dt.day == future_date.day) &
+                    (st.session_state.sales_df['day'].dt.month == future_date.month) &
+                    (st.session_state.sales_df['day'].dt.year < future_date.year)
+                ].copy()
+                
+                if not historical_sales.empty:
+                    # Group by year and calculate metrics
+                    yearly_stats = historical_sales.groupby(historical_sales['day'].dt.year).agg({
+                        'revenue': ['sum', 'mean', 'count'],
+                        'qty': ['sum', 'mean'],
+                        'disc_value': 'sum'
+                    }).round(2)
+                    
+                    yearly_stats.columns = ['Total Revenue', 'Average Revenue', 'Number of Records', 
+                                          'Total Quantity', 'Average Quantity', 'Total Discount']
+                    
+                    # Display yearly statistics
+                    st.write("Yearly Statistics for Same Day and Month:")
+                    st.dataframe(yearly_stats.style.format({
+                        'Total Revenue': '₹{:,.2f}',
+                        'Average Revenue': '₹{:,.2f}',
+                        'Total Quantity': '{:,.0f}',
+                        'Average Quantity': '{:,.2f}',
+                        'Total Discount': '₹{:,.2f}'
+                    }))
+                    
+                    # Create a line chart of historical revenue
+                    fig = px.line(
+                        historical_sales.sort_values('day'),
+                        x='day',
+                        y='revenue',
+                        title=f'Historical Revenue for Store {future_store} on {future_date.strftime("%B %d")}',
+                        labels={'day': 'Date', 'revenue': 'Revenue (₹)'}
+                    )
+                    st.plotly_chart(fig)
+                else:
+                    st.info(f"No historical sales data found for Store {future_store} on {future_date.strftime('%B %d')} in previous years.")
                 
                 # Add prediction to session state
                 new_prediction = pd.DataFrame({

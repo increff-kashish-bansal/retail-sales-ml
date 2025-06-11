@@ -1,4 +1,15 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import logging
+import os
+from datetime import datetime, timedelta
+import plotly.express as px
+import plotly.graph_objects as go
+from random_forest_generator import preprocess_data, train_random_forest, predict_revenue
+import json
+from sklearn.preprocessing import LabelEncoder
 
 # Set page config - must be first Streamlit command
 st.set_page_config(
@@ -8,17 +19,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import pandas as pd
-import numpy as np
-import joblib
-import logging
-import os
-from datetime import datetime, timedelta
-import plotly.express as px
-from random_forest_generator import preprocess_data, train_random_forest, predict_revenue
-import json
-from sklearn.preprocessing import LabelEncoder
-import plotly.graph_objects as go
+# Custom handler to display logs in Streamlit
+class StreamlitHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            st.text(msg)
+        except Exception:
+            self.handleError(record)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,21 +39,12 @@ if not logger.hasHandlers():
 # Load data
 try:
     logger.info("Loading data...")
-    sales_df = pd.read_csv('sales_combined.tsv', sep='\t')
+    sales_df = pd.read_csv('data/sales.tsv', sep='\t')
     logger.info("Data loaded successfully")
 except Exception as e:
     logger.error(f"Error loading data: {str(e)}", exc_info=True)
     st.error(f"Error loading data: {str(e)}")
     st.stop()
-
-# Custom handler to display logs in Streamlit
-class StreamlitHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            st.text(msg)
-        except Exception:
-            self.handleError(record)
 
 # Initialize session state for predictions if it doesn't exist
 if 'predictions' not in st.session_state:

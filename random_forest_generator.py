@@ -55,6 +55,11 @@ def preprocess_data(sales_df):
     try:
         logger.info("Starting data preprocessing...")
         
+        # Log initial data info
+        logger.info(f"Initial data shape: {sales_df.shape}")
+        logger.info(f"Initial columns: {sales_df.columns.tolist()}")
+        logger.info(f"Missing values:\n{sales_df.isnull().sum()}")
+        
         # Convert store to string type
         sales_df['store'] = sales_df['store'].astype(str)
         
@@ -65,6 +70,9 @@ def preprocess_data(sales_df):
         # Calculate MRP from revenue and quantity
         sales_df['mrp'] = (sales_df['revenue'] + sales_df['disc_value']) / sales_df['qty']
         logger.info("Calculated MRP using (disc_value + revenue) / qty")
+        
+        # Handle infinite values in MRP
+        sales_df['mrp'] = sales_df['mrp'].replace([np.inf, -np.inf], np.nan)
         
         # Aggregate sales at store-day level
         daily_sales = sales_df.groupby(['store', 'day']).agg({
@@ -85,6 +93,13 @@ def preprocess_data(sales_df):
         store_metrics.columns = ['store', 'avg_revenue', 'revenue_std', 'avg_mrp', 'avg_qty']
         store_metrics['revenue_volatility'] = store_metrics['revenue_std'] / store_metrics['avg_revenue']
         store_metrics['qty_volatility'] = daily_sales.groupby('store')['qty'].std() / daily_sales.groupby('store')['qty'].mean()
+        
+        # Handle NaN values in store metrics
+        store_metrics = store_metrics.fillna({
+            'revenue_volatility': 0,
+            'qty_volatility': 0,
+            'revenue_std': 0
+        })
         
         # Add store metrics to daily sales
         daily_sales = daily_sales.merge(store_metrics, on='store', how='left')
@@ -122,10 +137,28 @@ def preprocess_data(sales_df):
         X = daily_sales[feature_cols]
         y = daily_sales['revenue']
         
+        # Check for NaN values
+        nan_cols = X.columns[X.isnull().any()].tolist()
+        if nan_cols:
+            logger.warning(f"Found NaN values in columns: {nan_cols}")
+            # Fill NaN values with appropriate values
+            X = X.fillna({
+                'disc_value': 0,
+                'avg_revenue': X['avg_revenue'].mean(),
+                'revenue_volatility': 0,
+                'avg_mrp': X['avg_mrp'].mean(),
+                'avg_qty': X['avg_qty'].mean(),
+                'qty_volatility': 0
+            })
+        
         # Save feature names
         joblib.dump(feature_cols, 'models/feature_names.joblib')
         
         logger.info("Data preprocessing completed successfully")
+        logger.info(f"Final feature matrix shape: {X.shape}")
+        logger.info(f"Feature columns: {feature_cols}")
+        logger.info(f"Missing values in final data:\n{X.isnull().sum()}")
+        
         return X, y
         
     except Exception as e:

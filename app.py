@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from random_forest_generator import preprocess_data, train_random_forest, predict_revenue
 import json
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 
 # Set page config - must be first Streamlit command
 st.set_page_config(
@@ -367,64 +368,83 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 if st.session_state.sales_df is not None:
     try:
-        # Display basic statistics
-        st.markdown("""
-            <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
-                Basic Statistics
-            </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            total_revenue = st.session_state.sales_df['revenue'].sum()
-            avg_revenue = st.session_state.sales_df['revenue'].mean()
-            prev_avg_revenue = st.session_state.sales_df[st.session_state.sales_df['day'] < st.session_state.sales_df['day'].max()]['revenue'].mean()
-            revenue_trend = "📈" if avg_revenue > prev_avg_revenue else "📉"
-            
-            st.metric(
-                "Total Revenue", 
-                f"₹{total_revenue:,.2f}",
-                delta=f"{revenue_trend} ₹{total_revenue/len(st.session_state.sales_df['day'].unique()):,.2f} per day"
-            )
-            st.metric(
-                "Average Revenue", 
-                f"₹{avg_revenue:,.2f}",
-                delta=f"{revenue_trend} ₹{avg_revenue - prev_avg_revenue:,.2f} vs previous period"
-            )
-        
-        with col2:
-            total_qty = st.session_state.sales_df['qty'].sum()
-            avg_qty = st.session_state.sales_df['qty'].mean()
-            prev_avg_qty = st.session_state.sales_df[st.session_state.sales_df['day'] < st.session_state.sales_df['day'].max()]['qty'].mean()
-            qty_trend = "📈" if avg_qty > prev_avg_qty else "📉"
-            
-            st.metric(
-                "Total Quantity", 
-                f"{total_qty:,.0f}",
-                delta=f"{qty_trend} {total_qty/len(st.session_state.sales_df['day'].unique()):,.0f} per day"
-            )
-            st.metric(
-                "Average Quantity", 
-                f"{avg_qty:,.2f}",
-                delta=f"{qty_trend} {avg_qty - prev_avg_qty:,.2f} vs previous period"
-            )
-        
-        with col3:
-            num_stores = st.session_state.sales_df['store'].nunique()
-            date_range = f"{st.session_state.sales_df['day'].min().strftime('%Y-%m-%d')} to {st.session_state.sales_df['day'].max().strftime('%Y-%m-%d')}"
-            days_span = (st.session_state.sales_df['day'].max() - st.session_state.sales_df['day'].min()).days
-            
-            st.metric(
-                "Number of Stores", 
-                f"{num_stores:,}",
-                delta=f"Active over {days_span} days"
-            )
-            st.metric(
-                "Date Range", 
-                date_range,
-                delta=f"{days_span} days of data"
-            )
+        # Calculate metrics
+        total_revenue = st.session_state.sales_df['revenue'].sum()
+        avg_revenue = st.session_state.sales_df['revenue'].mean()
+        prev_avg_revenue = st.session_state.sales_df[st.session_state.sales_df['day'] < st.session_state.sales_df['day'].max()]['revenue'].mean()
+        revenue_trend = "📈" if avg_revenue > prev_avg_revenue else "📉"
+
+        # Calculate error metrics
+        if 'model' in st.session_state and st.session_state.model is not None:
+            try:
+                # Get predictions
+                X = st.session_state.sales_df[st.session_state.selected_features]
+                y_true = st.session_state.sales_df['revenue']
+                y_pred = st.session_state.model.predict(X)
+                
+                # Calculate error metrics
+                mae = mean_absolute_error(y_true, y_pred)
+                rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+                mape = mean_absolute_percentage_error(y_true, y_pred)
+                
+                # Display metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        "Total Revenue",
+                        f"₹{total_revenue:,.2f}",
+                        delta=f"{revenue_trend} ₹{total_revenue/len(st.session_state.sales_df):,.2f}"
+                    )
+                with col2:
+                    st.metric(
+                        "Mean Absolute Error",
+                        f"₹{mae:,.2f}",
+                        delta=f"{mape:.1f}%"
+                    )
+                with col3:
+                    st.metric(
+                        "Root Mean Square Error",
+                        f"₹{rmse:,.2f}"
+                    )
+            except Exception as e:
+                logger.error(f"Error calculating metrics: {str(e)}", exc_info=True)
+                # Display basic metrics without error calculations
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        "Total Revenue",
+                        f"₹{total_revenue:,.2f}",
+                        delta=f"{revenue_trend} ₹{total_revenue/len(st.session_state.sales_df):,.2f}"
+                    )
+                with col2:
+                    st.metric(
+                        "Average Revenue",
+                        f"₹{avg_revenue:,.2f}"
+                    )
+                with col3:
+                    st.metric(
+                        "Number of Records",
+                        f"{len(st.session_state.sales_df):,}"
+                    )
+        else:
+            # Display basic metrics when no model is available
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    "Total Revenue",
+                    f"₹{total_revenue:,.2f}",
+                    delta=f"{revenue_trend} ₹{total_revenue/len(st.session_state.sales_df):,.2f}"
+                )
+            with col2:
+                st.metric(
+                    "Average Revenue",
+                    f"₹{avg_revenue:,.2f}"
+                )
+            with col3:
+                st.metric(
+                    "Number of Records",
+                    f"{len(st.session_state.sales_df):,}"
+                )
     except Exception as e:
         st.error(f"Error processing data: {str(e)}")
         logger.error(f"Error processing data: {str(e)}", exc_info=True)
@@ -447,20 +467,28 @@ if st.button("Train Model", key="train_model_button"):
                 st.session_state.model = model
                 st.session_state.model_error = None
             
-            # Display metrics
-            st.markdown("""
-                <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
-                    Model Performance Metrics
-                </div>
-            """, unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("RMSE", f"₹{metrics['rmse']:,.2f}")
-                st.metric("R² Score", f"{metrics['r2']:.3f}")
-            with col2:
-                st.metric("MAPE", f"{metrics['mape']:.1f}%")
-                st.metric("Log MAE", f"{metrics['log_mae']:.3f}")
+            # Display model metrics if available
+            if 'model_metrics' in st.session_state and st.session_state.model_metrics is not None:
+                st.markdown("""
+                    <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
+                        Model Performance Metrics
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("RMSE", f"₹{st.session_state.model_metrics['rmse']:,.2f}")
+                with col2:
+                    st.metric("R² Score", f"{st.session_state.model_metrics['r2']:.3f}")
+                with col3:
+                    st.metric("MAPE", f"{st.session_state.model_metrics['mape']:.1f}%")
+            else:
+                st.markdown("""
+                    <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
+                        Model Performance Metrics
+                    </div>
+                """, unsafe_allow_html=True)
+                st.info("Model metrics will be available after training the model.")
             
             st.markdown("---")
             

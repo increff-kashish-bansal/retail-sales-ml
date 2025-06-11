@@ -45,13 +45,21 @@ def load_sales_data(file_path=None, uploaded_file=None):
     try:
         if uploaded_file is not None:
             logger.info("Loading data from uploaded file...")
+            logger.info(f"Uploaded file type: {type(uploaded_file)}")
+            logger.info(f"Uploaded file name: {uploaded_file.name}")
             sales_df = pd.read_csv(uploaded_file, sep='\t')
         else:
             logger.info(f"Loading data from file: {file_path}")
+            logger.info(f"File exists: {os.path.exists(file_path)}")
+            if os.path.exists(file_path):
+                logger.info(f"File size: {os.path.getsize(file_path)} bytes")
+                with open(file_path, 'r') as f:
+                    logger.info(f"First few lines of file:\n{f.readline()}\n{f.readline()}\n{f.readline()}")
             sales_df = pd.read_csv(file_path, sep='\t')
         
         logger.info(f"Data loaded. Shape: {sales_df.shape}")
         logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
+        logger.info(f"First few rows of data:\n{sales_df.head()}")
         
         # Ensure required columns exist
         required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
@@ -60,10 +68,19 @@ def load_sales_data(file_path=None, uploaded_file=None):
         if missing_columns:
             error_msg = f"Missing required columns: {', '.join(missing_columns)}"
             logger.error(error_msg)
+            logger.error(f"Available columns: {sales_df.columns.tolist()}")
             return None, error_msg
         
         # Convert day to datetime
-        sales_df['day'] = pd.to_datetime(sales_df['day'])
+        try:
+            sales_df['day'] = pd.to_datetime(sales_df['day'])
+            logger.info("Successfully converted 'day' column to datetime")
+        except Exception as e:
+            error_msg = f"Error converting 'day' column to datetime: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"'day' column values: {sales_df['day'].head()}")
+            return None, error_msg
+        
         logger.info("Data loaded successfully")
         return sales_df, None
         
@@ -76,6 +93,9 @@ def load_sales_data(file_path=None, uploaded_file=None):
 if 'sales_df' not in st.session_state:
     st.session_state.sales_df = None
     st.session_state.data_error = None
+
+# Create models directory if it doesn't exist
+os.makedirs('models', exist_ok=True)
 
 # Title and description
 st.markdown("""

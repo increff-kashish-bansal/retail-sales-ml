@@ -39,12 +39,51 @@ if not logger.hasHandlers():
 # Load data
 try:
     logger.info("Loading data...")
-    sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
-    logger.info("Data loaded successfully")
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Files in current directory: {os.listdir('.')}")
+    logger.info(f"Files in data directory: {os.listdir('data')}")
+    
+    # Try different encodings and separators
+    encodings = ['utf-8', 'latin1', 'cp1252']
+    separators = ['\t', ',', ';']
+    
+    for encoding in encodings:
+        for sep in separators:
+            try:
+                logger.info(f"Trying to load with encoding={encoding}, separator={sep}")
+                sales_df = pd.read_csv('data/sales_sample.tsv', sep=sep, encoding=encoding)
+                logger.info(f"Successfully loaded with encoding={encoding}, separator={sep}")
+                logger.info(f"Data loaded. Shape: {sales_df.shape}")
+                logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
+                
+                # Check if we have the required columns
+                required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
+                missing_columns = [col for col in required_columns if col not in sales_df.columns]
+                
+                if not missing_columns:
+                    # Convert day to datetime
+                    sales_df['day'] = pd.to_datetime(sales_df['day'])
+                    logger.info("Data loaded successfully")
+                    break
+                else:
+                    logger.warning(f"Missing columns with encoding={encoding}, separator={sep}: {missing_columns}")
+                    continue
+            except Exception as e:
+                logger.warning(f"Failed to load with encoding={encoding}, separator={sep}: {str(e)}")
+                continue
+        else:
+            continue
+        break
+    else:
+        raise ValueError("Could not load data with any combination of encoding and separator")
+    
 except Exception as e:
     logger.error(f"Error loading data: {str(e)}", exc_info=True)
     st.error(f"Error loading data: {str(e)}")
     st.stop()
+
+# Create models directory if it doesn't exist
+os.makedirs('models', exist_ok=True)
 
 # Initialize session state for predictions if it doesn't exist
 if 'predictions' not in st.session_state:
@@ -215,188 +254,150 @@ if st.button("Train Model", key="train_model_button"):
 # Load model and related files
 try:
     logger.info("Loading model and related files...")
-    model = joblib.load('models/random_forest_model.joblib')
-    transformer = joblib.load('models/yeo_johnson_transformer.joblib')
-    store_encoder = joblib.load('models/store_encoder.joblib')
-    feature_names = joblib.load('models/feature_names.joblib')
-    store_metrics = pd.read_csv('models/store_metrics.csv')
-    logger.info("All files loaded successfully")
+    
+    # Check if model files exist
+    model_files = {
+        'model': 'models/random_forest_model.joblib',
+        'transformer': 'models/yeo_johnson_transformer.joblib',
+        'store_encoder': 'models/store_encoder.joblib',
+        'feature_names': 'models/feature_names.joblib',
+        'store_metrics': 'models/store_metrics.csv'
+    }
+    
+    missing_files = [name for name, path in model_files.items() if not os.path.exists(path)]
+    
+    if missing_files:
+        logger.warning(f"Missing model files: {', '.join(missing_files)}")
+        logger.info("Model files will be created when training is performed")
+        model = None
+        transformer = None
+        store_encoder = None
+        feature_names = None
+        store_metrics = None
+    else:
+        model = joblib.load(model_files['model'])
+        transformer = joblib.load(model_files['transformer'])
+        store_encoder = joblib.load(model_files['store_encoder'])
+        feature_names = joblib.load(model_files['feature_names'])
+        store_metrics = pd.read_csv(model_files['store_metrics'])
+        logger.info("All files loaded successfully")
 except Exception as e:
     logger.error(f"Error loading model: {str(e)}", exc_info=True)
     st.error(f"Error loading model: {str(e)}")
-    st.stop()
+    model = None
+    transformer = None
+    store_encoder = None
+    feature_names = None
+    store_metrics = None
 
 # Prediction section
 st.markdown("### 🔮 4. Make Predictions", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Input fields
-future_date = st.date_input(
-    "Select Future Date",
-    value=datetime.now() + timedelta(days=30),
-    min_value=datetime.now(),
-    max_value=datetime.now() + timedelta(days=365),
-    help="Select the date for which you want to predict sales",
-    key="prediction_date_input"
-)
-
-# Get stores from current sales data
-available_stores = sales_df['store'].astype(str).str.strip().unique()
-future_store = st.selectbox(
-    "Select Store",
-    options=sorted(available_stores),
-    format_func=lambda x: f"Store {x}",
-    help="Choose the store for prediction",
-    key="store_selection"
-)
-
-future_disc_perc = st.slider(
-    "Discount Percentage",
-    min_value=0,
-    max_value=100,
-    value=0,
-    step=5,
-    help="Set the discount percentage for the prediction",
-    key="discount_slider"
-)
-
-# Calculate default average MRP from current sales data
-store_sales = sales_df[sales_df['store'].astype(str).str.strip() == str(future_store).strip()]
-if not store_sales.empty:
-    default_avg_mrp = (store_sales['revenue'] / store_sales['qty']).mean()
-else:
-    default_avg_mrp = 1000.0  # Fallback value
-
-st.write(f"Estimated Average MRP: ₹{default_avg_mrp:,.2f}")
-future_avg_mrp = st.number_input(
-    "Average MRP (₹)",
-    min_value=0.0,
-    value=float(default_avg_mrp),
-    help="Average Maximum Retail Price for the store",
-    key="mrp_input"
-)
-
-if st.button("Predict Revenue", key="make_prediction_button", type="primary"):
-    try:
-        with st.spinner("Making prediction..."):
-            # Make prediction
-            prediction, confidence_intervals = predict_revenue(
-                store=future_store,
-                future_date=future_date,
-                discount_percentage=future_disc_perc,
-                mrp=future_avg_mrp,
-                sales_df=sales_df  # Pass the current dataset
-            )
-            
-            # Display prediction results with better styling
-            st.markdown("""
-                <h2 style='color: #2E4053; border-bottom: 2px solid #2E4053; padding-bottom: 10px; margin-top: 40px;'>
-                    Prediction Results
-                </h2>
-            """, unsafe_allow_html=True)
-            
-            # Get actual sales for the same day and month in previous years
-            actual_sales = store_sales[
-                (store_sales['day'].dt.day == future_date.day) & 
-                (store_sales['day'].dt.month == future_date.month)
-            ].groupby(['store', 'day']).agg({
-                'revenue': 'sum',
-                'qty': 'sum'
-            }).reset_index()
-            
-            # Create metrics row with better styling
-            st.markdown("<div style='margin: 20px 0;'>", unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    label="Predicted Revenue",
-                    value=f"₹{prediction:,.2f}",
-                    delta=None
+# Only show prediction section if model is loaded
+if model is not None:
+    # Input fields
+    future_date = st.date_input(
+        "Select Future Date",
+        value=datetime.now() + timedelta(days=30),
+        min_value=datetime.now(),
+        max_value=datetime.now() + timedelta(days=365),
+        help="Select the date for which you want to predict sales",
+        key="prediction_date_input"
+    )
+    
+    # Get stores from current sales data
+    available_stores = sales_df['store'].astype(str).str.strip().unique()
+    future_store = st.selectbox(
+        "Select Store",
+        options=sorted(available_stores),
+        format_func=lambda x: f"Store {x}",
+        help="Choose the store for prediction",
+        key="store_selection"
+    )
+    
+    # Calculate default MRP based on current sales data
+    store_sales = sales_df[sales_df['store'] == future_store]
+    if not store_sales.empty:
+        default_mrp = (store_sales['revenue'] + store_sales['disc_value']).mean() / store_sales['qty'].mean()
+    else:
+        default_mrp = 1000.0  # Fallback value
+    
+    mrp = st.number_input(
+        "Maximum Retail Price (MRP)",
+        min_value=0.0,
+        value=float(default_mrp),
+        step=100.0,
+        help="Enter the MRP for the product",
+        key="mrp_input"
+    )
+    
+    discount_percentage = st.slider(
+        "Discount Percentage",
+        min_value=0,
+        max_value=100,
+        value=0,
+        step=5,
+        help="Select the discount percentage to apply",
+        key="discount_slider"
+    )
+    
+    # Make prediction button
+    if st.button("Predict Revenue", key="predict_button"):
+        try:
+            with st.spinner("Making prediction..."):
+                # Make prediction
+                predicted_revenue, confidence = predict_revenue(
+                    future_store,
+                    future_date,
+                    discount_percentage,
+                    mrp,
+                    sales_df=sales_df
                 )
-            
-            if not actual_sales.empty:
-                with col2:
-                    actual_revenue = actual_sales['revenue'].iloc[-1]
-                    trend = "📈" if prediction > actual_revenue else "📉"
-                    st.metric(
-                        label="Actual Revenue (Last Year)",
-                        value=f"₹{actual_revenue:,.2f}",
-                        delta=f"{trend} ₹{prediction - actual_revenue:,.2f}"
-                    )
-            
-            if confidence_intervals:
-                with col3:
-                    st.metric(
-                        label="Upper Bound (95% CI)",
-                        value=f"₹{confidence_intervals[1]:,.2f}",
-                        delta=None
-                    )
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            # Display historical sales in a table with better styling
-            if not actual_sales.empty:
+                
+                # Display prediction results
                 st.markdown("""
-                    <h3 style='color: #2E4053; margin-top: 30px;'>
-                        Historical Sales for Same Day/Month
-                    </h3>
+                    <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
+                        Prediction Results
+                    </div>
                 """, unsafe_allow_html=True)
                 
-                # Create a formatted table of historical sales
-                historical_data = []
-                for _, row in actual_sales.iterrows():
-                    historical_data.append({
-                        'Date': row['day'].strftime('%Y-%m-%d'),
-                        'Revenue': f"₹{row['revenue']:,.2f}",
-                        'Quantity': f"{row['qty']:,.0f}"
-                    })
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        "Predicted Revenue",
+                        f"₹{predicted_revenue:,.2f}",
+                        delta=f"Confidence: {confidence:.1f}%"
+                    )
                 
-                # Add average row
-                avg_revenue = actual_sales['revenue'].mean()
-                avg_qty = actual_sales['qty'].mean()
-                historical_data.append({
-                    'Date': 'Average',
-                    'Revenue': f"₹{avg_revenue:,.2f}",
-                    'Quantity': f"{avg_qty:,.0f}"
+                # Get actual sales data for comparison
+                actual_sales = sales_df[
+                    (sales_df['store'] == future_store) &
+                    (sales_df['day'].dt.date == future_date)
+                ]
+                
+                if not actual_sales.empty:
+                    actual_revenue = actual_sales['revenue'].sum()
+                    with col2:
+                        st.metric(
+                            "Actual Revenue",
+                            f"₹{actual_revenue:,.2f}",
+                            delta=f"Difference: ₹{predicted_revenue - actual_revenue:,.2f}"
+                        )
+                
+                # Add prediction to session state
+                new_prediction = pd.DataFrame({
+                    'store': [future_store],
+                    'day': [future_date],
+                    'avg_mrp': [mrp],
+                    'disc_percentage': [discount_percentage],
+                    'predicted_revenue': [predicted_revenue],
+                    'confidence': [confidence]
                 })
+                st.session_state.predictions = pd.concat([st.session_state.predictions, new_prediction], ignore_index=True)
                 
-                # Display the table with custom styling
-                st.markdown("""
-                    <style>
-                        .dataframe {
-                            width: 100%;
-                            border-collapse: collapse;
-                            margin: 20px 0;
-                        }
-                        .dataframe th {
-                            background-color: #2E4053;
-                            color: white;
-                            padding: 12px;
-                            text-align: left;
-                        }
-                        .dataframe td {
-                            padding: 12px;
-                            border-bottom: 1px solid #ddd;
-                        }
-                        .dataframe tr:last-child {
-                            font-weight: bold;
-                            background-color: #f8f9fa;
-                        }
-                    </style>
-                """, unsafe_allow_html=True)
-                
-                st.table(pd.DataFrame(historical_data))
-                
-                # Add comparison metrics with better styling
-                st.markdown("<div style='margin: 20px 0;'>", unsafe_allow_html=True)
-                trend = "📈" if prediction > avg_revenue else "📉"
-                st.metric(
-                    label="Prediction vs Historical Average",
-                    value=f"₹{prediction:,.2f}",
-                    delta=f"{trend} ₹{prediction - avg_revenue:,.2f}"
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-            
-    except Exception as e:
-        st.error(f"Error making prediction: {str(e)}")
-        logger.error(f"Error in main: {str(e)}", exc_info=True) 
+        except Exception as e:
+            st.error(f"Error making prediction: {str(e)}")
+            logger.error(f"Error making prediction: {str(e)}", exc_info=True)
+else:
+    st.info("Please train the model first to enable predictions.") 

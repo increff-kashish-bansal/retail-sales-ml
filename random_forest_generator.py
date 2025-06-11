@@ -426,18 +426,71 @@ def predict_revenue(store, future_date, discount_percentage, mrp, sales_df=None)
 def load_data():
     """Load and prepare data for training"""
     try:
-        # Load data
-        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+        logger.info("Starting data loading process...")
+        
+        # Try different possible file paths
+        possible_paths = [
+            'data/sales_sample.tsv',
+            'sales_sample.tsv',
+            os.path.join('data', 'sales_sample.tsv'),
+            os.path.join(os.getcwd(), 'data', 'sales_sample.tsv')
+        ]
+        
+        sales_df = None
+        used_path = None
+        
+        for path in possible_paths:
+            try:
+                logger.info(f"Attempting to load data from: {path}")
+                if os.path.exists(path):
+                    sales_df = pd.read_csv(path, sep='\t')
+                    used_path = path
+                    logger.info(f"Successfully loaded data from: {path}")
+                    break
+            except Exception as e:
+                logger.warning(f"Failed to load from {path}: {str(e)}")
+                continue
+        
+        if sales_df is None:
+            raise FileNotFoundError("Could not find or load the sales data file")
+        
+        logger.info(f"Data loaded successfully from: {used_path}")
+        logger.info(f"Data shape: {sales_df.shape}")
+        logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
+        
+        # Check for required columns
+        required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
+        missing_columns = [col for col in required_columns if col not in sales_df.columns]
+        
+        if missing_columns:
+            error_msg = f"Missing required columns: {', '.join(missing_columns)}"
+            logger.error(error_msg)
+            logger.error(f"Available columns: {sales_df.columns.tolist()}")
+            raise ValueError(error_msg)
         
         # Convert date columns to datetime
-        sales_df['day'] = pd.to_datetime(sales_df['day'])
+        try:
+            sales_df['day'] = pd.to_datetime(sales_df['day'])
+            logger.info("Successfully converted 'day' column to datetime")
+        except Exception as e:
+            logger.error(f"Error converting 'day' column to datetime: {str(e)}")
+            logger.error(f"'day' column values: {sales_df['day'].head()}")
+            raise
         
-        # Ensure store column is string type in both dataframes
-        sales_df['store'] = sales_df['store'].astype(str)
+        # Ensure store column is string type
+        try:
+            sales_df['store'] = sales_df['store'].astype(str)
+            logger.info("Successfully converted 'store' column to string")
+        except Exception as e:
+            logger.error(f"Error converting 'store' column to string: {str(e)}")
+            logger.error(f"'store' column values: {sales_df['store'].head()}")
+            raise
         
+        logger.info("Data preparation completed successfully")
         return sales_df
+        
     except Exception as e:
-        logger.error(f"Error loading data: {str(e)}")
+        logger.error(f"Error loading data: {str(e)}", exc_info=True)
         raise
 
 def evaluate_model(model, X_test, y_test, transformer):

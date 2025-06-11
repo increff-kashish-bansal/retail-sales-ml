@@ -203,7 +203,7 @@ def train_random_forest():
         logger.info("Starting model training...")
         
         # Load data
-        sales_df = pd.read_csv('sales_combined.tsv', sep='\t')
+        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
         logger.info(f"Sales data loaded. Shape: {sales_df.shape}")
         
         # Preprocess data
@@ -270,7 +270,7 @@ def predict_revenue(store, future_date, discount_percentage, mrp):
         feature_names = joblib.load('models/feature_names.joblib')
         store_encoder = joblib.load('models/store_encoder.joblib')
         store_metrics = pd.read_csv('models/store_metrics.csv')
-        sales_df = pd.read_csv('sales_combined.tsv', sep='\t')
+        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
         
         logger.info("All required files loaded successfully")
         
@@ -415,17 +415,17 @@ def load_data():
     """Load and prepare data for training"""
     try:
         # Load data
-        sales_df = pd.read_csv('sales_combined.tsv', sep='\t')
-        store_df = pd.read_csv('store_combined.tsv', sep='\t')
+        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
+
         
         # Convert date columns to datetime
         sales_df['day'] = pd.to_datetime(sales_df['day'])
         
         # Ensure store column is string type in both dataframes
         sales_df['store'] = sales_df['store'].astype(str)
-        store_df['store'] = store_df['store'].astype(str)
+
         
-        return sales_df, store_df
+        return sales_df
     except Exception as e:
         logger.error(f"Error loading data: {str(e)}")
         raise

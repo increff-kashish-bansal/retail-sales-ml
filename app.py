@@ -67,7 +67,7 @@ st.markdown("""
 st.markdown("### 📁 1. Data Upload", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-use_default = st.checkbox("Use default files (sales_combined.tsv)")
+use_default = st.checkbox("Use default files (sales.tsv)")
 
 if not use_default:
     sales_file = st.file_uploader("Upload Sales Data (TSV)", type=['tsv'])
@@ -283,7 +283,7 @@ if st.button("Predict Revenue", key="make_prediction_button", type="primary"):
             """, unsafe_allow_html=True)
             
             # Get historical sales data
-            sales_df = pd.read_csv('sales_combined.tsv', sep='\t')
+            sales_df = pd.read_csv('data/sales.tsv', sep='\t')
             sales_df['day'] = pd.to_datetime(sales_df['day'])
             store_sales = sales_df[sales_df['store'].astype(str).str.strip() == str(future_store)]
             

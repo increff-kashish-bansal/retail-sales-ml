@@ -11,6 +11,8 @@ from random_forest_generator import preprocess_data, train_random_forest, predic
 import json
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score
 
 # Set page config - must be first Streamlit command
 st.set_page_config(
@@ -480,17 +482,11 @@ st.markdown("<br>", unsafe_allow_html=True)
 if st.button("Train Model", key="train_model_button"):
     try:
         with st.spinner("Training model..."):
-            model, feature_names, store_encoder, store_metrics = load_or_train_model(st.session_state.sales_df)
-            if model is None:
-                # Train new model
-                model, metrics, feature_importance, selected_features = train_random_forest(st.session_state.sales_df)
-                st.session_state.model = model
-                st.session_state.model_metrics = metrics
-                st.session_state.selected_features = selected_features
-                st.session_state.feature_importance = feature_importance
-            else:
-                st.session_state.model = model
-                st.session_state.selected_features = feature_names
+            model, metrics, feature_importance, selected_features = train_random_forest(st.session_state.sales_df)
+            st.session_state.model = model
+            st.session_state.model_metrics = metrics
+            st.session_state.selected_features = selected_features
+            st.session_state.feature_importance = feature_importance
             
             # Display model metrics if available
             if st.session_state.model_metrics is not None:
@@ -687,33 +683,49 @@ with st.expander("Diagnostic Information"):
     if st.session_state.model_error:
         st.error(f"Model error: {st.session_state.model_error}")
 
-def load_or_train_model(sales_df):
-    """Load existing model or train a new one"""
+def train_random_forest(sales_df):
+    """Train a Random Forest model on the sales data"""
     try:
-        logger.info("Loading model and related files...")
-        model_files = {
-            'model': 'models/random_forest_model.joblib',
-            'feature_names': 'models/feature_names.joblib',
-            'store_encoder': 'models/store_encoder.joblib',
-            'store_metrics': 'models/store_metrics.csv'
+        logger.info("Starting model training...")
+        
+        # Prepare features
+        X = sales_df[['store', 'sku', 'disc_value']]
+        y = sales_df['revenue']
+        
+        # Train model
+        model = RandomForestRegressor(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42
+        )
+        model.fit(X, y)
+        
+        # Calculate metrics
+        y_pred = model.predict(X)
+        rmse = np.sqrt(mean_squared_error(y, y_pred))
+        r2 = r2_score(y, y_pred)
+        mape = mean_absolute_percentage_error(y, y_pred) * 100
+        
+        metrics = {
+            'rmse': rmse,
+            'r2': r2,
+            'mape': mape
         }
         
-        # Check if all required files exist
-        missing_files = [name for name, path in model_files.items() if not os.path.exists(path)]
-        if missing_files:
-            logger.warning(f"Missing model files: {', '.join(missing_files)}")
-            logger.info("Model files will be created when training is performed")
-            return None, None, None, None
+        # Calculate feature importance
+        feature_importance = pd.DataFrame({
+            'feature': X.columns,
+            'importance': model.feature_importances_
+        }).sort_values('importance', ascending=False)
         
-        # Load model and related files
-        model = joblib.load(model_files['model'])
-        feature_names = joblib.load(model_files['feature_names'])
-        store_encoder = joblib.load(model_files['store_encoder'])
-        store_metrics = pd.read_csv(model_files['store_metrics'])
+        # Save model and related files
+        os.makedirs('models', exist_ok=True)
+        joblib.dump(model, 'models/random_forest_model.joblib')
+        joblib.dump(X.columns.tolist(), 'models/feature_names.joblib')
         
-        logger.info("All files loaded successfully")
-        return model, feature_names, store_encoder, store_metrics
+        logger.info("Model training completed successfully")
+        return model, metrics, feature_importance, X.columns.tolist()
         
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}", exc_info=True)
-        return None, None, None, None 
+        logger.error(f"Error during model training: {str(e)}", exc_info=True)
+        raise 

@@ -37,57 +37,45 @@ if not logger.hasHandlers():
     logger.addHandler(StreamlitHandler())
 
 # Load data
-try:
-    logger.info("Loading data...")
-    logger.info(f"Current working directory: {os.getcwd()}")
-    logger.info(f"Files in current directory: {os.listdir('.')}")
-    logger.info(f"Files in data directory: {os.listdir('data')}")
-    
-    # Try different encodings and separators
-    encodings = ['utf-8', 'latin1', 'cp1252']
-    separators = ['\t', ',', ';']
-    
-    for encoding in encodings:
-        for sep in separators:
-            try:
-                logger.info(f"Trying to load with encoding={encoding}, separator={sep}")
-                sales_df = pd.read_csv('data/sales_sample.tsv', sep=sep, encoding=encoding)
-                logger.info(f"Successfully loaded with encoding={encoding}, separator={sep}")
-                logger.info(f"Data loaded. Shape: {sales_df.shape}")
-                logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
-                
-                # Check if we have the required columns
-                required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
-                missing_columns = [col for col in required_columns if col not in sales_df.columns]
-                
-                if not missing_columns:
-                    # Convert day to datetime
-                    sales_df['day'] = pd.to_datetime(sales_df['day'])
-                    logger.info("Data loaded successfully")
-                    break
-                else:
-                    logger.warning(f"Missing columns with encoding={encoding}, separator={sep}: {missing_columns}")
-                    continue
-            except Exception as e:
-                logger.warning(f"Failed to load with encoding={encoding}, separator={sep}: {str(e)}")
-                continue
+def load_sales_data(file_path=None, uploaded_file=None):
+    """
+    Load sales data from either a file path or an uploaded file.
+    Returns the loaded DataFrame and any error message.
+    """
+    try:
+        if uploaded_file is not None:
+            logger.info("Loading data from uploaded file...")
+            sales_df = pd.read_csv(uploaded_file, sep='\t')
         else:
-            continue
-        break
-    else:
-        raise ValueError("Could not load data with any combination of encoding and separator")
-    
-except Exception as e:
-    logger.error(f"Error loading data: {str(e)}", exc_info=True)
-    st.error(f"Error loading data: {str(e)}")
-    st.stop()
+            logger.info(f"Loading data from file: {file_path}")
+            sales_df = pd.read_csv(file_path, sep='\t')
+        
+        logger.info(f"Data loaded. Shape: {sales_df.shape}")
+        logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
+        
+        # Ensure required columns exist
+        required_columns = ['day', 'store', 'sku', 'disc_value', 'revenue', 'qty']
+        missing_columns = [col for col in required_columns if col not in sales_df.columns]
+        
+        if missing_columns:
+            error_msg = f"Missing required columns: {', '.join(missing_columns)}"
+            logger.error(error_msg)
+            return None, error_msg
+        
+        # Convert day to datetime
+        sales_df['day'] = pd.to_datetime(sales_df['day'])
+        logger.info("Data loaded successfully")
+        return sales_df, None
+        
+    except Exception as e:
+        error_msg = f"Error loading data: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return None, error_msg
 
-# Create models directory if it doesn't exist
-os.makedirs('models', exist_ok=True)
-
-# Initialize session state for predictions if it doesn't exist
-if 'predictions' not in st.session_state:
-    st.session_state.predictions = pd.DataFrame(columns=['store', 'day', 'avg_mrp', 'disc_percentage', 'predicted_revenue', 'confidence'])
+# Initialize session state
+if 'sales_df' not in st.session_state:
+    st.session_state.sales_df = None
+    st.session_state.data_error = None
 
 # Title and description
 st.markdown("""
@@ -111,19 +99,24 @@ use_default = st.checkbox("Use default sample file (sales_sample.tsv)")
 if not use_default:
     sales_file = st.file_uploader("Upload Sales Data (TSV)", type=['tsv'])
     if sales_file is not None:
-        try:
-            sales_df = pd.read_csv(sales_file, sep='\t')
-            st.success("Custom data file loaded successfully!")
-        except Exception as e:
-            st.error(f"Error loading custom file: {str(e)}")
+        sales_df, error = load_sales_data(uploaded_file=sales_file)
+        if error:
+            st.error(error)
             st.info("Falling back to sample data file...")
-            sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+            sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
     else:
         st.info("No file uploaded. Using sample data file...")
-        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+        sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
 else:
-    sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
-    st.success("Using sample data file.")
+    sales_df, error = load_sales_data(file_path='data/sales_sample.tsv')
+
+if error:
+    st.error(error)
+    st.stop()
+
+# Store the loaded data in session state
+st.session_state.sales_df = sales_df
+st.session_state.data_error = error
 
 st.markdown("---")
 
@@ -131,11 +124,8 @@ st.markdown("---")
 st.markdown("### 📊 2. Data Summary", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-if 'sales_df' in locals():
+if st.session_state.sales_df is not None:
     try:
-        # Ensure day column is datetime
-        sales_df['day'] = pd.to_datetime(sales_df['day'])
-        
         # Display basic statistics
         st.markdown("""
             <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
@@ -146,15 +136,15 @@ if 'sales_df' in locals():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            total_revenue = sales_df['revenue'].sum()
-            avg_revenue = sales_df['revenue'].mean()
-            prev_avg_revenue = sales_df[sales_df['day'] < sales_df['day'].max()]['revenue'].mean()
+            total_revenue = st.session_state.sales_df['revenue'].sum()
+            avg_revenue = st.session_state.sales_df['revenue'].mean()
+            prev_avg_revenue = st.session_state.sales_df[st.session_state.sales_df['day'] < st.session_state.sales_df['day'].max()]['revenue'].mean()
             revenue_trend = "📈" if avg_revenue > prev_avg_revenue else "📉"
             
             st.metric(
                 "Total Revenue", 
                 f"₹{total_revenue:,.2f}",
-                delta=f"{revenue_trend} ₹{total_revenue/len(sales_df['day'].unique()):,.2f} per day"
+                delta=f"{revenue_trend} ₹{total_revenue/len(st.session_state.sales_df['day'].unique()):,.2f} per day"
             )
             st.metric(
                 "Average Revenue", 
@@ -163,15 +153,15 @@ if 'sales_df' in locals():
             )
         
         with col2:
-            total_qty = sales_df['qty'].sum()
-            avg_qty = sales_df['qty'].mean()
-            prev_avg_qty = sales_df[sales_df['day'] < sales_df['day'].max()]['qty'].mean()
+            total_qty = st.session_state.sales_df['qty'].sum()
+            avg_qty = st.session_state.sales_df['qty'].mean()
+            prev_avg_qty = st.session_state.sales_df[st.session_state.sales_df['day'] < st.session_state.sales_df['day'].max()]['qty'].mean()
             qty_trend = "📈" if avg_qty > prev_avg_qty else "📉"
             
             st.metric(
                 "Total Quantity", 
                 f"{total_qty:,.0f}",
-                delta=f"{qty_trend} {total_qty/len(sales_df['day'].unique()):,.0f} per day"
+                delta=f"{qty_trend} {total_qty/len(st.session_state.sales_df['day'].unique()):,.0f} per day"
             )
             st.metric(
                 "Average Quantity", 
@@ -180,9 +170,9 @@ if 'sales_df' in locals():
             )
         
         with col3:
-            num_stores = sales_df['store'].nunique()
-            date_range = f"{sales_df['day'].min().strftime('%Y-%m-%d')} to {sales_df['day'].max().strftime('%Y-%m-%d')}"
-            days_span = (sales_df['day'].max() - sales_df['day'].min()).days
+            num_stores = st.session_state.sales_df['store'].nunique()
+            date_range = f"{st.session_state.sales_df['day'].min().strftime('%Y-%m-%d')} to {st.session_state.sales_df['day'].max().strftime('%Y-%m-%d')}"
+            days_span = (st.session_state.sales_df['day'].max() - st.session_state.sales_df['day'].min()).days
             
             st.metric(
                 "Number of Stores", 
@@ -208,7 +198,7 @@ if st.button("Train Model", key="train_model_button"):
     try:
         with st.spinner("Training model..."):
             # Train the model with current dataset
-            model, metrics, feature_importance, selected_features = train_random_forest(sales_df=sales_df)
+            model, metrics, feature_importance, selected_features = train_random_forest(sales_df=st.session_state.sales_df)
             
             st.success("Model training completed!")
             
@@ -307,7 +297,7 @@ if model is not None:
     )
     
     # Get stores from current sales data
-    available_stores = sales_df['store'].astype(str).str.strip().unique()
+    available_stores = st.session_state.sales_df['store'].astype(str).str.strip().unique()
     future_store = st.selectbox(
         "Select Store",
         options=sorted(available_stores),
@@ -317,7 +307,7 @@ if model is not None:
     )
     
     # Calculate default MRP based on current sales data
-    store_sales = sales_df[sales_df['store'] == future_store]
+    store_sales = st.session_state.sales_df[st.session_state.sales_df['store'] == future_store]
     if not store_sales.empty:
         default_mrp = (store_sales['revenue'] + store_sales['disc_value']).mean() / store_sales['qty'].mean()
     else:
@@ -352,7 +342,7 @@ if model is not None:
                     future_date,
                     discount_percentage,
                     mrp,
-                    sales_df=sales_df
+                    sales_df=st.session_state.sales_df
                 )
                 
                 # Display prediction results
@@ -371,9 +361,9 @@ if model is not None:
                     )
                 
                 # Get actual sales data for comparison
-                actual_sales = sales_df[
-                    (sales_df['store'] == future_store) &
-                    (sales_df['day'].dt.date == future_date)
+                actual_sales = st.session_state.sales_df[
+                    (st.session_state.sales_df['store'] == future_store) &
+                    (st.session_state.sales_df['day'].dt.date == future_date)
                 ]
                 
                 if not actual_sales.empty:

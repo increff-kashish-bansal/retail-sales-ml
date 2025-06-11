@@ -42,7 +42,7 @@ streamlit run app.py
 - `app.py`: Main Streamlit application
 - `random_forest_generator.py`: Machine learning model implementation
 - `data/`: Directory containing sales data
-  - `sales.tsv`: Sales data file
+  - `sales_sample.tsv`: Sample sales data file for demonstration
   - `store_combined.tsv`: Store information file
 
 ## Important Notes
@@ -50,6 +50,7 @@ streamlit run app.py
 - The machine learning models are generated at runtime when you first run the application
 - No pre-trained models are included in the repository
 - The application will automatically train new models when needed
+- A sample dataset is provided for demonstration purposes
 
 ## Requirements
 

@@ -67,12 +67,24 @@ st.markdown("""
 st.markdown("### 📁 1. Data Upload", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-use_default = st.checkbox("Use default files (sales.tsv)")
+use_default = st.checkbox("Use default sample file (sales_sample.tsv)")
 
 if not use_default:
     sales_file = st.file_uploader("Upload Sales Data (TSV)", type=['tsv'])
+    if sales_file is not None:
+        try:
+            sales_df = pd.read_csv(sales_file, sep='\t')
+            st.success("Custom data file loaded successfully!")
+        except Exception as e:
+            st.error(f"Error loading custom file: {str(e)}")
+            st.info("Falling back to sample data file...")
+            sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+    else:
+        st.info("No file uploaded. Using sample data file...")
+        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
 else:
-    sales_file = None
+    sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+    st.success("Using sample data file.")
 
 st.markdown("---")
 
@@ -156,8 +168,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 if st.button("Train Model", key="train_model_button"):
     try:
         with st.spinner("Training model..."):
-            # Train the model
-            model, metrics, feature_importance, selected_features = train_random_forest()
+            # Train the model with current dataset
+            model, metrics, feature_importance, selected_features = train_random_forest(sales_df=sales_df)
             
             st.success("Model training completed!")
             
@@ -228,7 +240,7 @@ future_date = st.date_input(
     key="prediction_date_input"
 )
 
-# Get stores from sales data
+# Get stores from current sales data
 available_stores = sales_df['store'].astype(str).str.strip().unique()
 future_store = st.selectbox(
     "Select Store",
@@ -248,7 +260,7 @@ future_disc_perc = st.slider(
     key="discount_slider"
 )
 
-# Calculate default average MRP from sales data
+# Calculate default average MRP from current sales data
 store_sales = sales_df[sales_df['store'].astype(str).str.strip() == str(future_store).strip()]
 if not store_sales.empty:
     default_avg_mrp = (store_sales['revenue'] / store_sales['qty']).mean()
@@ -272,7 +284,8 @@ if st.button("Predict Revenue", key="make_prediction_button", type="primary"):
                 store=future_store,
                 future_date=future_date,
                 discount_percentage=future_disc_perc,
-                mrp=future_avg_mrp
+                mrp=future_avg_mrp,
+                sales_df=sales_df  # Pass the current dataset
             )
             
             # Display prediction results with better styling
@@ -281,11 +294,6 @@ if st.button("Predict Revenue", key="make_prediction_button", type="primary"):
                     Prediction Results
                 </h2>
             """, unsafe_allow_html=True)
-            
-            # Get historical sales data
-            sales_df = pd.read_csv('data/sales.tsv', sep='\t')
-            sales_df['day'] = pd.to_datetime(sales_df['day'])
-            store_sales = sales_df[sales_df['store'].astype(str).str.strip() == str(future_store)]
             
             # Get actual sales for the same day and month in previous years
             actual_sales = store_sales[

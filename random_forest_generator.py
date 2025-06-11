@@ -192,9 +192,12 @@ def analyze_revenue_distribution(y):
         logger.error("Full traceback:", exc_info=True)
         raise
 
-def train_random_forest():
+def train_random_forest(sales_df=None):
     """
     Train a Random Forest model on the preprocessed data.
+    
+    Args:
+        sales_df (pd.DataFrame, optional): Current sales data. If None, loads from file.
     
     Returns:
         tuple: (model, metrics, feature_importance, selected_features)
@@ -202,8 +205,13 @@ def train_random_forest():
     try:
         logger.info("Starting model training...")
         
-        # Load data
-        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+        # Use provided sales_df or load from file
+        if sales_df is None:
+            sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
+            logger.info("Using sample data file for training")
+        else:
+            logger.info("Using provided dataset for training")
+            
         logger.info(f"Sales data loaded. Shape: {sales_df.shape}")
         
         # Preprocess data
@@ -247,7 +255,7 @@ def train_random_forest():
         logger.error(f"Error in model training: {str(e)}", exc_info=True)
         raise
 
-def predict_revenue(store, future_date, discount_percentage, mrp):
+def predict_revenue(store, future_date, discount_percentage, mrp, sales_df=None):
     """
     Predict revenue for a store on a future date.
     
@@ -256,6 +264,7 @@ def predict_revenue(store, future_date, discount_percentage, mrp):
         future_date (str): Future date in YYYY-MM-DD format
         discount_percentage (float): Discount percentage (0-100)
         mrp (float): Mean retail price
+        sales_df (pd.DataFrame, optional): Current sales data. If None, loads from file.
     
     Returns:
         tuple: (predicted_revenue, confidence_intervals)
@@ -270,7 +279,10 @@ def predict_revenue(store, future_date, discount_percentage, mrp):
         feature_names = joblib.load('models/feature_names.joblib')
         store_encoder = joblib.load('models/store_encoder.joblib')
         store_metrics = pd.read_csv('models/store_metrics.csv')
-        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
+        
+        # Use provided sales_df or load from file
+        if sales_df is None:
+            sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
         
         logger.info("All required files loaded successfully")
         
@@ -415,15 +427,13 @@ def load_data():
     """Load and prepare data for training"""
     try:
         # Load data
-        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
-
+        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
         
         # Convert date columns to datetime
         sales_df['day'] = pd.to_datetime(sales_df['day'])
         
         # Ensure store column is string type in both dataframes
         sales_df['store'] = sales_df['store'].astype(str)
-
         
         return sales_df
     except Exception as e:

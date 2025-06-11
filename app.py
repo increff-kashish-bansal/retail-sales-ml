@@ -133,32 +133,53 @@ def load_sales_data(file_path=None, uploaded_file=None):
             logger.info("Loading data from uploaded file...")
             logger.info(f"Uploaded file type: {type(uploaded_file)}")
             logger.info(f"Uploaded file name: {uploaded_file.name}")
+            
             # Read the file content first
             content = uploaded_file.read()
             logger.info(f"Raw file content (first 1000 bytes): {content[:1000]}")
+            
             # Reset file pointer
             uploaded_file.seek(0)
-            # Try different separators
-            try:
-                sales_df = pd.read_csv(uploaded_file, sep='\t', encoding='utf-8')
-                logger.info("Successfully read with tab separator and utf-8 encoding")
-            except Exception as e1:
-                logger.warning(f"Failed to read with tab separator: {str(e1)}")
+            
+            # Try to detect file format
+            if uploaded_file.name.endswith('.tsv'):
+                logger.info("Detected TSV file format")
                 try:
+                    sales_df = pd.read_csv(uploaded_file, sep='\t', encoding='utf-8')
+                    logger.info("Successfully read TSV file with tab separator")
+                except Exception as e:
+                    logger.warning(f"Failed to read as TSV: {str(e)}")
                     uploaded_file.seek(0)
-                    sales_df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
-                    logger.info("Successfully read with comma separator and utf-8 encoding")
-                except Exception as e2:
-                    logger.warning(f"Failed to read with comma separator: {str(e2)}")
+                    try:
+                        sales_df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
+                        logger.info("Successfully read TSV file with comma separator")
+                    except Exception as e:
+                        logger.error(f"Failed to read file: {str(e)}")
+                        raise
+            elif uploaded_file.name.endswith('.csv'):
+                logger.info("Detected CSV file format")
+                try:
+                    sales_df = pd.read_csv(uploaded_file, encoding='utf-8')
+                    logger.info("Successfully read CSV file")
+                except Exception as e:
+                    logger.error(f"Failed to read CSV file: {str(e)}")
+                    raise
+            else:
+                logger.warning(f"Unknown file format: {uploaded_file.name}")
+                # Try to detect separator
+                if '\t' in content.decode('utf-8'):
+                    logger.info("Detected tab separator in content")
                     uploaded_file.seek(0)
-                    # Try to detect separator
-                    content = uploaded_file.read()
+                    sales_df = pd.read_csv(uploaded_file, sep='\t', encoding='utf-8')
+                else:
+                    logger.info("Using comma separator as default")
                     uploaded_file.seek(0)
-                    if '\t' in content:
-                        sales_df = pd.read_csv(uploaded_file, sep='\t', engine='python', encoding='utf-8')
-                        logger.info("Successfully read with python engine and tab separator")
-                    else:
-                        raise Exception("Could not determine file format")
+                    sales_df = pd.read_csv(uploaded_file, encoding='utf-8')
+            
+            logger.info(f"Successfully loaded uploaded file. Shape: {sales_df.shape}")
+            logger.info(f"Columns in uploaded file: {sales_df.columns.tolist()}")
+            logger.info(f"First few rows of uploaded data:\n{sales_df.head()}")
+            
         else:
             # Get the correct path for the file
             file_path = get_data_path(file_path)
@@ -218,10 +239,6 @@ def load_sales_data(file_path=None, uploaded_file=None):
                     else:
                         raise Exception("Could not determine file format")
         
-        logger.info(f"Data loaded. Shape: {sales_df.shape}")
-        logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
-        logger.info(f"First few rows of data:\n{sales_df.head()}")
-        
         # Check for column name variations
         column_mapping = {
             'day': ['day', 'date', 'Day', 'Date', 'DAY', 'DATE'],
@@ -261,7 +278,31 @@ def load_sales_data(file_path=None, uploaded_file=None):
             logger.error(f"'day' column values: {sales_df['day'].head()}")
             return None, error_msg
         
+        # Convert numeric columns
+        numeric_columns = ['disc_value', 'revenue', 'qty']
+        for col in numeric_columns:
+            try:
+                sales_df[col] = pd.to_numeric(sales_df[col], errors='coerce')
+                logger.info(f"Successfully converted '{col}' column to numeric")
+            except Exception as e:
+                error_msg = f"Error converting '{col}' column to numeric: {str(e)}"
+                logger.error(error_msg)
+                logger.error(f"'{col}' column values: {sales_df[col].head()}")
+                return None, error_msg
+        
+        # Handle any remaining NaN values
+        sales_df = sales_df.fillna({
+            'disc_value': 0,
+            'revenue': 0,
+            'qty': 0
+        })
+        
         logger.info("Data loaded successfully")
+        logger.info(f"Final data shape: {sales_df.shape}")
+        logger.info(f"Final columns: {sales_df.columns.tolist()}")
+        logger.info(f"Data types:\n{sales_df.dtypes}")
+        logger.info(f"Missing values:\n{sales_df.isnull().sum()}")
+        
         return sales_df, None
         
     except Exception as e:

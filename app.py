@@ -39,7 +39,7 @@ if not logger.hasHandlers():
 # Load data
 try:
     logger.info("Loading data...")
-    sales_df = pd.read_csv('data/sales.tsv', sep='\t')
+    sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
     logger.info("Data loaded successfully")
 except Exception as e:
     logger.error(f"Error loading data: {str(e)}", exc_info=True)

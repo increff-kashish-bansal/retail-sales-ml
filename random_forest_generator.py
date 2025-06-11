@@ -203,7 +203,7 @@ def train_random_forest():
         logger.info("Starting model training...")
         
         # Load data
-        sales_df = pd.read_csv('data/sales.tsv', sep='\t')
+        sales_df = pd.read_csv('data/sales_sample.tsv', sep='\t')
         logger.info(f"Sales data loaded. Shape: {sales_df.shape}")
         
         # Preprocess data

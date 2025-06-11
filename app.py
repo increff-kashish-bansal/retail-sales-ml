@@ -36,6 +36,37 @@ logger = logging.getLogger(__name__)
 if not logger.hasHandlers():
     logger.addHandler(StreamlitHandler())
 
+def get_data_path(filename):
+    """
+    Get the correct path for data files, handling different OS path separators.
+    """
+    # Get the current working directory
+    cwd = os.getcwd()
+    logger.info(f"Current working directory: {cwd}")
+    
+    # List all files in the current directory
+    logger.info(f"Files in current directory: {os.listdir(cwd)}")
+    
+    # Try different possible paths
+    possible_paths = [
+        os.path.join(cwd, 'data', filename),  # data/sales_sample.tsv
+        os.path.join(cwd, filename),          # sales_sample.tsv
+        os.path.join('data', filename),       # relative data/sales_sample.tsv
+        filename                              # just the filename
+    ]
+    
+    # Log all possible paths
+    logger.info("Trying possible paths:")
+    for path in possible_paths:
+        logger.info(f"Checking path: {path}")
+        if os.path.exists(path):
+            logger.info(f"Found file at: {path}")
+            return path
+    
+    # If no path works, return the first one (will raise error later)
+    logger.warning(f"No valid path found for {filename}, using default: {possible_paths[0]}")
+    return possible_paths[0]
+
 # Load data
 def load_sales_data(file_path=None, uploaded_file=None):
     """
@@ -74,8 +105,11 @@ def load_sales_data(file_path=None, uploaded_file=None):
                     else:
                         raise Exception("Could not determine file format")
         else:
+            # Get the correct path for the file
+            file_path = get_data_path(file_path)
             logger.info(f"Loading data from file: {file_path}")
             logger.info(f"File exists: {os.path.exists(file_path)}")
+            
             if os.path.exists(file_path):
                 logger.info(f"File size: {os.path.getsize(file_path)} bytes")
                 # Read file content for debugging
@@ -183,7 +217,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 use_sample = st.checkbox("Use sample dataset", value=True)
 
 if use_sample:
-    sales_df, error = load_sales_data('data/sales_sample.tsv')
+    sales_df, error = load_sales_data('sales_sample.tsv')
     if error:
         st.error(f"Error loading sample data: {error}")
     else:

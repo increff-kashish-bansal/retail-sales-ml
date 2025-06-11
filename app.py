@@ -310,39 +310,20 @@ def load_sales_data(file_path=None, uploaded_file=None):
         logger.error(error_msg, exc_info=True)
         return None, error_msg
 
-def load_or_train_model(sales_df):
-    """
-    Load existing model or train a new one if not available.
-    Returns the model and any error message.
-    """
-    try:
-        model_path = os.path.join('models', 'random_forest_model.joblib')
-        if os.path.exists(model_path):
-            logger.info("Loading existing model...")
-            model = joblib.load(model_path)
-            logger.info("Model loaded successfully")
-            return model, None
-        else:
-            logger.info("No existing model found. Training new model...")
-            model = train_random_forest(sales_df)
-            logger.info("Model trained successfully")
-            
-            # Save the model
-            os.makedirs('models', exist_ok=True)
-            joblib.dump(model, model_path)
-            logger.info("Model saved successfully")
-            return model, None
-            
-    except Exception as e:
-        error_msg = f"Error with model: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return None, error_msg
-
-# Initialize session state
+# Initialize session state variables
 if 'sales_df' not in st.session_state:
     st.session_state.sales_df = None
-    st.session_state.data_error = None
+if 'model' not in st.session_state:
     st.session_state.model = None
+if 'model_metrics' not in st.session_state:
+    st.session_state.model_metrics = None
+if 'selected_features' not in st.session_state:
+    st.session_state.selected_features = None
+if 'feature_importance' not in st.session_state:
+    st.session_state.feature_importance = None
+if 'data_error' not in st.session_state:
+    st.session_state.data_error = None
+if 'model_error' not in st.session_state:
     st.session_state.model_error = None
 
 # Create models directory if it doesn't exist
@@ -499,17 +480,20 @@ st.markdown("<br>", unsafe_allow_html=True)
 if st.button("Train Model", key="train_model_button"):
     try:
         with st.spinner("Training model..."):
-            model, error = load_or_train_model(st.session_state.sales_df)
-            if error:
-                st.error(f"Error training model: {error}")
-                st.session_state.model_error = error
-            else:
-                st.success("Model trained successfully!")
+            model, feature_names, store_encoder, store_metrics = load_or_train_model(st.session_state.sales_df)
+            if model is None:
+                # Train new model
+                model, metrics, feature_importance, selected_features = train_random_forest(st.session_state.sales_df)
                 st.session_state.model = model
-                st.session_state.model_error = None
+                st.session_state.model_metrics = metrics
+                st.session_state.selected_features = selected_features
+                st.session_state.feature_importance = feature_importance
+            else:
+                st.session_state.model = model
+                st.session_state.selected_features = feature_names
             
             # Display model metrics if available
-            if 'model_metrics' in st.session_state and st.session_state.model_metrics is not None:
+            if st.session_state.model_metrics is not None:
                 st.markdown("""
                     <div style='color: #2E4053; padding: 10px 0; font-size: 1.2em;'>
                         Model Performance Metrics
@@ -555,51 +539,28 @@ if st.button("Train Model", key="train_model_button"):
         st.error(f"Error during training: {str(e)}")
         logger.error(f"Error during training: {str(e)}", exc_info=True)
 
-# Load model and related files
-try:
-    logger.info("Loading model and related files...")
-    
-    # Check if model files exist
-    model_files = {
-        'model': 'models/random_forest_model.joblib',
-        'transformer': 'models/yeo_johnson_transformer.joblib',
-        'store_encoder': 'models/store_encoder.joblib',
-        'feature_names': 'models/feature_names.joblib',
-        'store_metrics': 'models/store_metrics.csv'
-    }
-    
-    missing_files = [name for name, path in model_files.items() if not os.path.exists(path)]
-    
-    if missing_files:
-        logger.warning(f"Missing model files: {', '.join(missing_files)}")
-        logger.info("Model files will be created when training is performed")
-        model = None
-        transformer = None
-        store_encoder = None
-        feature_names = None
-        store_metrics = None
-    else:
-        model = joblib.load(model_files['model'])
-        transformer = joblib.load(model_files['transformer'])
-        store_encoder = joblib.load(model_files['store_encoder'])
-        feature_names = joblib.load(model_files['feature_names'])
-        store_metrics = pd.read_csv(model_files['store_metrics'])
-        logger.info("All files loaded successfully")
-except Exception as e:
-    logger.error(f"Error loading model: {str(e)}", exc_info=True)
-    st.error(f"Error loading model: {str(e)}")
-    model = None
-    transformer = None
-    store_encoder = None
-    feature_names = None
-    store_metrics = None
+# Display model information
+st.subheader("Model Information")
+if st.session_state.model is not None:
+    st.write("Model type:", type(st.session_state.model).__name__)
+    if hasattr(st.session_state.model, 'get_params'):
+        st.write("Model parameters:", st.session_state.model.get_params())
+    if st.session_state.selected_features is not None:
+        st.write("Selected features:", st.session_state.selected_features)
+
+# Display error information
+st.subheader("Error Information")
+if st.session_state.data_error:
+    st.error(f"Data Error: {st.session_state.data_error}")
+if st.session_state.model_error:
+    st.error(f"Model Error: {st.session_state.model_error}")
 
 # Prediction section
 st.markdown("### 🔮 4. Make Predictions", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Only show prediction section if model is loaded
-if model is not None:
+if st.session_state.model is not None:
     # Input fields
     future_date = st.date_input(
         "Select Future Date",
@@ -724,4 +685,35 @@ with st.expander("Diagnostic Information"):
     if st.session_state.data_error:
         st.error(f"Data error: {st.session_state.data_error}")
     if st.session_state.model_error:
-        st.error(f"Model error: {st.session_state.model_error}") 
+        st.error(f"Model error: {st.session_state.model_error}")
+
+def load_or_train_model(sales_df):
+    """Load existing model or train a new one"""
+    try:
+        logger.info("Loading model and related files...")
+        model_files = {
+            'model': 'models/random_forest_model.joblib',
+            'feature_names': 'models/feature_names.joblib',
+            'store_encoder': 'models/store_encoder.joblib',
+            'store_metrics': 'models/store_metrics.csv'
+        }
+        
+        # Check if all required files exist
+        missing_files = [name for name, path in model_files.items() if not os.path.exists(path)]
+        if missing_files:
+            logger.warning(f"Missing model files: {', '.join(missing_files)}")
+            logger.info("Model files will be created when training is performed")
+            return None, None, None, None
+        
+        # Load model and related files
+        model = joblib.load(model_files['model'])
+        feature_names = joblib.load(model_files['feature_names'])
+        store_encoder = joblib.load(model_files['store_encoder'])
+        store_metrics = pd.read_csv(model_files['store_metrics'])
+        
+        logger.info("All files loaded successfully")
+        return model, feature_names, store_encoder, store_metrics
+        
+    except Exception as e:
+        logger.error(f"Error loading model: {str(e)}", exc_info=True)
+        return None, None, None, None 

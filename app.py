@@ -315,6 +315,8 @@ def load_sales_data(file_path=None, uploaded_file=None):
 # Initialize session state variables
 if 'sales_df' not in st.session_state:
     st.session_state.sales_df = None
+if 'data_error' not in st.session_state:
+    st.session_state.data_error = None
 if 'model' not in st.session_state:
     st.session_state.model = None
 if 'model_metrics' not in st.session_state:
@@ -323,10 +325,14 @@ if 'selected_features' not in st.session_state:
     st.session_state.selected_features = None
 if 'feature_importance' not in st.session_state:
     st.session_state.feature_importance = None
-if 'data_error' not in st.session_state:
-    st.session_state.data_error = None
-if 'model_error' not in st.session_state:
-    st.session_state.model_error = None
+if 'predictions' not in st.session_state:
+    st.session_state.predictions = pd.DataFrame(columns=[
+        'store', 'day', 'avg_mrp', 'disc_percentage', 
+        'predicted_revenue', 'confidence'
+    ])
+
+# Initialize error variable
+error = None
 
 # Create models directory if it doesn't exist
 os.makedirs('models', exist_ok=True)
@@ -344,41 +350,36 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# File upload section
-st.markdown("### 📁 1. Data Upload", unsafe_allow_html=True)
+# Load data section
+st.markdown("### 📁 1. Load Data", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-use_sample = st.checkbox("Use sample dataset", value=True)
+# File uploader
+uploaded_file = st.file_uploader("Upload your sales data (TSV format)", type=['tsv'])
 
-if use_sample:
+if uploaded_file is not None:
+    sales_df, error = load_sales_data(uploaded_file=uploaded_file)
+    if error:
+        st.error(f"Error loading uploaded data: {error}")
+        st.stop()
+    else:
+        st.success("Data uploaded successfully!")
+        st.session_state.sales_df = sales_df
+        st.session_state.data_error = None
+else:
+    # Try to load sample data
     try:
-        sales_df, error = load_sales_data(SAMPLE_FILE)
+        sales_df, error = load_sales_data(file_path='sales_sample.tsv')
         if error:
             st.error(f"Error loading sample data: {error}")
+            st.stop()
         else:
             st.success("Sample data loaded successfully!")
             st.session_state.sales_df = sales_df
             st.session_state.data_error = None
-    except FileNotFoundError as e:
-        st.error(f"Sample data file not found: {str(e)}")
-        st.session_state.data_error = str(e)
     except Exception as e:
-        st.error(f"Unexpected error loading sample data: {str(e)}")
-        st.session_state.data_error = str(e)
-else:
-    uploaded_file = st.file_uploader("Upload your sales data (TSV format)", type=['tsv'])
-    if uploaded_file is not None:
-        sales_df, error = load_sales_data(uploaded_file=uploaded_file)
-        if error:
-            st.error(f"Error loading uploaded data: {error}")
-        else:
-            st.success("Data uploaded successfully!")
-            st.session_state.sales_df = sales_df
-            st.session_state.data_error = None
-
-if error:
-    st.error(error)
-    st.stop()
+        st.error(f"Error loading sample data: {str(e)}")
+        st.stop()
 
 # Store the loaded data in session state
 st.session_state.sales_df = sales_df
@@ -401,9 +402,8 @@ if st.session_state.sales_df is not None:
         # Calculate error metrics
         if 'model' in st.session_state and st.session_state.model is not None:
             try:
-                # Get predictions
-                X = st.session_state.sales_df[st.session_state.selected_features]
-                y_true = st.session_state.sales_df['revenue']
+                # Preprocess data first
+                X, y_true = preprocess_data(st.session_state.sales_df)
                 y_pred = st.session_state.model.predict(X)
                 
                 # Calculate error metrics
@@ -628,7 +628,7 @@ if st.session_state.model is not None:
                     st.metric(
                         "Predicted Revenue",
                         f"₹{predicted_revenue:,.2f}",
-                        delta=f"Confidence: {confidence:.1f}%"
+                        delta=f"Confidence Range: ₹{confidence[0]:,.2f} - ₹{confidence[1]:,.2f}"
                     )
                 
                 # Get actual sales data for comparison

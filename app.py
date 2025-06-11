@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 if not logger.hasHandlers():
     logger.addHandler(StreamlitHandler())
 
+# Define data paths
+DATA_DIR = "data"
+SAMPLE_FILE = "sales_sample.tsv"
+COMBINED_FILE = "sales_combined.tsv"
+
 def get_data_path(filename):
     """
     Get the correct path for data files, handling different OS path separators.
@@ -44,15 +49,19 @@ def get_data_path(filename):
     cwd = os.getcwd()
     logger.info(f"Current working directory: {cwd}")
     
-    # List all files in the current directory
+    # List all files in the current directory and data directory
     logger.info(f"Files in current directory: {os.listdir(cwd)}")
+    if os.path.exists(DATA_DIR):
+        logger.info(f"Files in data directory: {os.listdir(DATA_DIR)}")
+    else:
+        logger.warning(f"Data directory '{DATA_DIR}' not found")
     
     # Try different possible paths
     possible_paths = [
-        os.path.join(cwd, 'data', filename),  # data/sales_sample.tsv
-        os.path.join(cwd, filename),          # sales_sample.tsv
-        os.path.join('data', filename),       # relative data/sales_sample.tsv
-        filename                              # just the filename
+        os.path.join(cwd, DATA_DIR, filename),  # /full/path/data/sales_sample.tsv
+        os.path.join(DATA_DIR, filename),       # data/sales_sample.tsv
+        os.path.join(cwd, filename),            # /full/path/sales_sample.tsv
+        filename                                # sales_sample.tsv
     ]
     
     # Log all possible paths
@@ -63,9 +72,17 @@ def get_data_path(filename):
             logger.info(f"Found file at: {path}")
             return path
     
-    # If no path works, return the first one (will raise error later)
-    logger.warning(f"No valid path found for {filename}, using default: {possible_paths[0]}")
-    return possible_paths[0]
+    # If no path works, raise a detailed error
+    error_msg = (
+        f"Could not find file '{filename}'. "
+        f"Current directory: {cwd}\n"
+        f"Files in current directory: {os.listdir(cwd)}\n"
+        f"Data directory exists: {os.path.exists(DATA_DIR)}\n"
+        f"Files in data directory: {os.listdir(DATA_DIR) if os.path.exists(DATA_DIR) else 'N/A'}\n"
+        f"Tried paths: {possible_paths}"
+    )
+    logger.error(error_msg)
+    raise FileNotFoundError(error_msg)
 
 # Load data
 def load_sales_data(file_path=None, uploaded_file=None):
@@ -108,33 +125,40 @@ def load_sales_data(file_path=None, uploaded_file=None):
             # Get the correct path for the file
             file_path = get_data_path(file_path)
             logger.info(f"Loading data from file: {file_path}")
-            logger.info(f"File exists: {os.path.exists(file_path)}")
             
-            if os.path.exists(file_path):
-                logger.info(f"File size: {os.path.getsize(file_path)} bytes")
-                # Read file content for debugging
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    logger.info(f"File content preview: {content[:500]}")
-                # Try different separators
+            if not os.path.exists(file_path):
+                error_msg = (
+                    f"File not found: {file_path}\n"
+                    f"Current directory: {os.getcwd()}\n"
+                    f"Files in current directory: {os.listdir('.')}\n"
+                    f"Data directory exists: {os.path.exists(DATA_DIR)}\n"
+                    f"Files in data directory: {os.listdir(DATA_DIR) if os.path.exists(DATA_DIR) else 'N/A'}"
+                )
+                logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
+            
+            logger.info(f"File size: {os.path.getsize(file_path)} bytes")
+            # Read file content for debugging
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                logger.info(f"File content preview: {content[:500]}")
+            # Try different separators
+            try:
+                sales_df = pd.read_csv(file_path, sep='\t')
+                logger.info("Successfully read with tab separator")
+            except Exception as e1:
+                logger.warning(f"Failed to read with tab separator: {str(e1)}")
                 try:
-                    sales_df = pd.read_csv(file_path, sep='\t')
-                    logger.info("Successfully read with tab separator")
-                except Exception as e1:
-                    logger.warning(f"Failed to read with tab separator: {str(e1)}")
-                    try:
-                        sales_df = pd.read_csv(file_path, sep=',')
-                        logger.info("Successfully read with comma separator")
-                    except Exception as e2:
-                        logger.warning(f"Failed to read with comma separator: {str(e2)}")
-                        # Try to detect separator
-                        if '\t' in content:
-                            sales_df = pd.read_csv(file_path, sep='\t', engine='python')
-                            logger.info("Successfully read with python engine and tab separator")
-                        else:
-                            raise Exception("Could not determine file format")
-            else:
-                raise FileNotFoundError(f"File not found: {file_path}")
+                    sales_df = pd.read_csv(file_path, sep=',')
+                    logger.info("Successfully read with comma separator")
+                except Exception as e2:
+                    logger.warning(f"Failed to read with comma separator: {str(e2)}")
+                    # Try to detect separator
+                    if '\t' in content:
+                        sales_df = pd.read_csv(file_path, sep='\t', engine='python')
+                        logger.info("Successfully read with python engine and tab separator")
+                    else:
+                        raise Exception("Could not determine file format")
         
         logger.info(f"Data loaded. Shape: {sales_df.shape}")
         logger.info(f"Columns in dataset: {sales_df.columns.tolist()}")
@@ -217,13 +241,20 @@ st.markdown("<br>", unsafe_allow_html=True)
 use_sample = st.checkbox("Use sample dataset", value=True)
 
 if use_sample:
-    sales_df, error = load_sales_data('sales_sample.tsv')
-    if error:
-        st.error(f"Error loading sample data: {error}")
-    else:
-        st.success("Sample data loaded successfully!")
-        st.session_state.sales_df = sales_df
-        st.session_state.data_error = None
+    try:
+        sales_df, error = load_sales_data(SAMPLE_FILE)
+        if error:
+            st.error(f"Error loading sample data: {error}")
+        else:
+            st.success("Sample data loaded successfully!")
+            st.session_state.sales_df = sales_df
+            st.session_state.data_error = None
+    except FileNotFoundError as e:
+        st.error(f"Sample data file not found: {str(e)}")
+        st.session_state.data_error = str(e)
+    except Exception as e:
+        st.error(f"Unexpected error loading sample data: {str(e)}")
+        st.session_state.data_error = str(e)
 else:
     uploaded_file = st.file_uploader("Upload your sales data (TSV format)", type=['tsv'])
     if uploaded_file is not None:

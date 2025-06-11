@@ -97,19 +97,19 @@ def load_sales_data(file_path=None, uploaded_file=None):
             logger.info(f"Uploaded file name: {uploaded_file.name}")
             # Read the file content first
             content = uploaded_file.read()
-            logger.info(f"File content preview: {content[:500]}")
+            logger.info(f"Raw file content (first 1000 bytes): {content[:1000]}")
             # Reset file pointer
             uploaded_file.seek(0)
             # Try different separators
             try:
-                sales_df = pd.read_csv(uploaded_file, sep='\t')
-                logger.info("Successfully read with tab separator")
+                sales_df = pd.read_csv(uploaded_file, sep='\t', encoding='utf-8')
+                logger.info("Successfully read with tab separator and utf-8 encoding")
             except Exception as e1:
                 logger.warning(f"Failed to read with tab separator: {str(e1)}")
                 try:
                     uploaded_file.seek(0)
-                    sales_df = pd.read_csv(uploaded_file, sep=',')
-                    logger.info("Successfully read with comma separator")
+                    sales_df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
+                    logger.info("Successfully read with comma separator and utf-8 encoding")
                 except Exception as e2:
                     logger.warning(f"Failed to read with comma separator: {str(e2)}")
                     uploaded_file.seek(0)
@@ -117,7 +117,7 @@ def load_sales_data(file_path=None, uploaded_file=None):
                     content = uploaded_file.read()
                     uploaded_file.seek(0)
                     if '\t' in content:
-                        sales_df = pd.read_csv(uploaded_file, sep='\t', engine='python')
+                        sales_df = pd.read_csv(uploaded_file, sep='\t', engine='python', encoding='utf-8')
                         logger.info("Successfully read with python engine and tab separator")
                     else:
                         raise Exception("Could not determine file format")
@@ -138,24 +138,35 @@ def load_sales_data(file_path=None, uploaded_file=None):
                 raise FileNotFoundError(error_msg)
             
             logger.info(f"File size: {os.path.getsize(file_path)} bytes")
-            # Read file content for debugging
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                logger.info(f"File content preview: {content[:500]}")
-            # Try different separators
+            
+            # Try different encodings
+            encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+            for encoding in encodings:
+                try:
+                    logger.info(f"Trying to read file with {encoding} encoding...")
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                        logger.info(f"Successfully read file with {encoding} encoding")
+                        logger.info(f"Raw file content (first 1000 bytes): {content[:1000]}")
+                        break
+                except UnicodeDecodeError:
+                    logger.warning(f"Failed to read with {encoding} encoding")
+                    continue
+            
+            # Try different separators with the successful encoding
             try:
-                sales_df = pd.read_csv(file_path, sep='\t')
+                sales_df = pd.read_csv(file_path, sep='\t', encoding=encoding)
                 logger.info("Successfully read with tab separator")
             except Exception as e1:
                 logger.warning(f"Failed to read with tab separator: {str(e1)}")
                 try:
-                    sales_df = pd.read_csv(file_path, sep=',')
+                    sales_df = pd.read_csv(file_path, sep=',', encoding=encoding)
                     logger.info("Successfully read with comma separator")
                 except Exception as e2:
                     logger.warning(f"Failed to read with comma separator: {str(e2)}")
                     # Try to detect separator
                     if '\t' in content:
-                        sales_df = pd.read_csv(file_path, sep='\t', engine='python')
+                        sales_df = pd.read_csv(file_path, sep='\t', engine='python', encoding=encoding)
                         logger.info("Successfully read with python engine and tab separator")
                     else:
                         raise Exception("Could not determine file format")
@@ -166,12 +177,12 @@ def load_sales_data(file_path=None, uploaded_file=None):
         
         # Check for column name variations
         column_mapping = {
-            'day': ['day', 'date', 'Day', 'Date'],
-            'store': ['store', 'Store', 'store_id', 'Store_ID'],
-            'sku': ['sku', 'SKU', 'product_id', 'Product_ID'],
-            'disc_value': ['disc_value', 'discount', 'Discount', 'discount_value'],
-            'revenue': ['revenue', 'Revenue', 'sales', 'Sales'],
-            'qty': ['qty', 'quantity', 'Quantity', 'QTY']
+            'day': ['day', 'date', 'Day', 'Date', 'DAY', 'DATE'],
+            'store': ['store', 'Store', 'store_id', 'Store_ID', 'STORE'],
+            'sku': ['sku', 'SKU', 'product_id', 'Product_ID', 'PRODUCT_ID'],
+            'disc_value': ['disc_value', 'discount', 'Discount', 'discount_value', 'DISCOUNT'],
+            'revenue': ['revenue', 'Revenue', 'sales', 'Sales', 'REVENUE', 'SALES'],
+            'qty': ['qty', 'quantity', 'Quantity', 'QTY', 'QUANTITY']
         }
         
         # Map columns to standard names
@@ -208,6 +219,34 @@ def load_sales_data(file_path=None, uploaded_file=None):
         
     except Exception as e:
         error_msg = f"Error loading data: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return None, error_msg
+
+def load_or_train_model(sales_df):
+    """
+    Load existing model or train a new one if not available.
+    Returns the model and any error message.
+    """
+    try:
+        model_path = os.path.join('models', 'random_forest_model.joblib')
+        if os.path.exists(model_path):
+            logger.info("Loading existing model...")
+            model = joblib.load(model_path)
+            logger.info("Model loaded successfully")
+            return model, None
+        else:
+            logger.info("No existing model found. Training new model...")
+            model = train_random_forest(sales_df)
+            logger.info("Model trained successfully")
+            
+            # Save the model
+            os.makedirs('models', exist_ok=True)
+            joblib.dump(model, model_path)
+            logger.info("Model saved successfully")
+            return model, None
+            
+    except Exception as e:
+        error_msg = f"Error with model: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return None, error_msg
 
@@ -353,10 +392,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 if st.button("Train Model", key="train_model_button"):
     try:
         with st.spinner("Training model..."):
-            # Train the model with current dataset
-            model, metrics, feature_importance, selected_features = train_random_forest(sales_df=st.session_state.sales_df)
-            
-            st.success("Model training completed!")
+            model, error = load_or_train_model(st.session_state.sales_df)
+            if error:
+                st.error(f"Error training model: {error}")
+                st.session_state.model_error = error
+            else:
+                st.success("Model trained successfully!")
+                st.session_state.model = model
+                st.session_state.model_error = None
             
             # Display metrics
             st.markdown("""
